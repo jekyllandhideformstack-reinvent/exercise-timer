@@ -399,14 +399,32 @@
   }
 
   // ── Speech ───────────────────────────────────────────────────────────────
+  function getFemaleVoice() {
+    const voices = window.speechSynthesis.getVoices();
+    // Prefer explicitly female English voices
+    const femaleKeywords = ['female', 'woman', 'zira', 'susan', 'hazel',
+                            'samantha', 'victoria', 'karen', 'moira',
+                            'fiona', 'tessa', 'kate', 'aria'];
+    const enVoices = voices.filter(v => v.lang.startsWith('en'));
+    const hit = enVoices.find(v =>
+      femaleKeywords.some(k => v.name.toLowerCase().includes(k))
+    );
+    return hit || enVoices[0] || voices[0] || null;
+  }
+
   function speak(text) {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate  = 0.95;
     utterance.pitch = 1;
+    const voice = getFemaleVoice();
+    if (voice) utterance.voice = voice;
     window.speechSynthesis.speak(utterance);
   }
+
+  // Voices load asynchronously — update when ready
+  window.speechSynthesis.onvoiceschanged = () => {}; // triggers voice list population
 
   // ── Audio ─────────────────────────────────────────────────────────────────
   let audioCtx = null;
