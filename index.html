@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Exercise Timer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background:
+        url('https://images.pexels.com/photos/1954524/pexels-photo-1954524.jpeg?_gl=1*riw3rt*_ga*MzcwMTc4ODQyLjE3NzMwNjE3NDA.*_ga_8JE65Q40S6*czE3NzMwNjE3MzkkbzEkZzAkdDE3NzMwNjE3NDAkajU5JGwwJGgw')
+        center / cover no-repeat fixed;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      color: #fff;
+      overflow: hidden;
+    }
+
+    /* ── Dark overlay for readability ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 32px;
+      padding: 24px;
+      text-align: center;
+    }
+
+    /* ── Header ── */
+    .header {
+      font-size: 0.85rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #7c7ca8;
+    }
+
+    /* ── Exercise name ── */
+    .exercise-name {
+      font-size: clamp(2rem, 6vw, 4rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+      min-height: 2.5em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      max-width: 700px;
+      transition: opacity 0.4s ease, transform 0.4s ease;
+    }
+
+    .exercise-name.fade-out {
+      opacity: 0;
+      transform: translateY(-12px);
+    }
+
+    .exercise-name.fade-in {
+      animation: fadeIn 0.4s ease forwards;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Countdown ring ── */
+    .ring-wrapper {
+      position: relative;
+      width: 200px;
+      height: 200px;
+    }
+
+    .ring-wrapper svg {
+      transform: rotate(-90deg);
+      width: 200px;
+      height: 200px;
+    }
+
+    .ring-bg {
+      fill: none;
+      stroke: #1e1e3a;
+      stroke-width: 10;
+    }
+
+    .ring-progress {
+      fill: none;
+      stroke: #6c63ff;
+      stroke-width: 10;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 1s linear, stroke 0.5s ease;
+    }
+
+    .ring-text {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+    }
+
+    .ring-seconds {
+      font-size: 3.5rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .ring-label {
+      font-size: 0.75rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #7c7ca8;
+    }
+
+    /* ── Progress bar ── */
+    .progress-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      width: min(400px, 90vw);
+    }
+
+    .progress-label {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 0.05em;
+      background: rgba(108, 99, 255, 0.25);
+      border: 1px solid rgba(108, 99, 255, 0.5);
+      border-radius: 10px;
+      padding: 6px 20px;
+    }
+
+    .progress-bar-track {
+      width: 100%;
+      height: 6px;
+      background: #1e1e3a;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #6c63ff, #a78bfa);
+      border-radius: 999px;
+      transition: width 0.5s ease;
+    }
+
+    /* ── Controls ── */
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    button {
+      padding: 10px 24px;
+      border: 1px solid #3a3a5c;
+      border-radius: 8px;
+      background: #1a1a30;
+      color: #c4c4e0;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s, color 0.2s;
+    }
+
+    button:hover {
+      background: #2a2a4a;
+      border-color: #6c63ff;
+      color: #fff;
+    }
+
+    button.primary {
+      background: #6c63ff;
+      border-color: #6c63ff;
+      color: #fff;
+    }
+
+    button.primary:hover {
+      background: #5a52e0;
+    }
+
+    /* ── File picker (fallback) ── */
+    .file-section {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 24px 32px;
+      border: 1px dashed #3a3a5c;
+      border-radius: 12px;
+      max-width: 400px;
+    }
+
+    .file-section.visible { display: flex; }
+
+    .file-section p {
+      font-size: 0.85rem;
+      color: #7c7ca8;
+      line-height: 1.5;
+      text-align: center;
+    }
+
+    .file-section label {
+      padding: 10px 24px;
+      background: #2a2a4a;
+      border: 1px solid #3a3a5c;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: #c4c4e0;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .file-section label:hover {
+      background: #3a3a5c;
+      border-color: #6c63ff;
+      color: #fff;
+    }
+
+    #file-input { display: none; }
+
+    /* ── Urgency colour when low ── */
+    .ring-progress.urgent { stroke: #f97316; }
+    .ring-seconds.urgent  { color: #f97316; }
+
+    /* ── Next exercise preview ── */
+    .next-exercise {
+      font-size: 1.9rem;
+      color: #a0a0c8;
+      letter-spacing: 0.05em;
+      min-height: 1.4em;
+      transition: opacity 0.3s ease;
+      opacity: 0;
+    }
+
+    .next-exercise.visible {
+      opacity: 1;
+    }
+
+    .next-exercise span {
+      color: #fff;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Status / loading -->
+  <p class="header" id="status">Loading exercises…</p>
+
+  <!-- Exercise name -->
+  <div class="exercise-name" id="exercise-name"></div>
+
+  <!-- Next exercise preview -->
+  <div class="next-exercise" id="next-exercise"></div>
+
+  <!-- Countdown ring -->
+  <div class="ring-wrapper" id="ring-wrapper" style="display:none">
+    <svg viewBox="0 0 200 200">
+      <circle class="ring-bg" cx="100" cy="100" r="88" />
+      <circle class="ring-progress" id="ring-progress" cx="100" cy="100" r="88"
+        stroke-dasharray="552.92"
+        stroke-dashoffset="0" />
+    </svg>
+    <div class="ring-text">
+      <span class="ring-seconds" id="ring-seconds">60</span>
+      <span class="ring-label">seconds</span>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-section" id="progress-section" style="display:none">
+    <span class="progress-label" id="progress-label">Exercise 1 of 30</span>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="progress-bar-fill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls" id="controls" style="display:none">
+    <button id="btn-prev">&#8592; Prev</button>
+    <button class="primary" id="btn-pause">Pause</button>
+    <button id="btn-next">Next &#8594;</button>
+  </div>
+
+  <!-- File picker fallback -->
+  <div class="file-section" id="file-section">
+    <p>Could not load <code>exercises.csv</code> automatically.<br>
+       Select the file below, or serve this page via a local server.</p>
+    <label for="file-input">Choose exercises.csv</label>
+    <input type="file" id="file-input" accept=".csv,.txt" />
+  </div>
+
+</div>
+
+<script>
+  // ── Config ──────────────────────────────────────────────────────────────
+  const DURATION = 60; // seconds per exercise
+  const CSV_PATH = 'exercises.csv';
+  const FALLBACK_BG = "url('https://images.pexels.com/photos/1954524/pexels-photo-1954524.jpeg?_gl=1*riw3rt*_ga*MzcwMTc4ODQyLjE3NzMwNjE3NDA.*_ga_8JE65Q40S6*czE3NzMwNjE3MzkkbzEkZzAkdDE3NzMwNjE3NDAkajU5JGwwJGgw') center / cover no-repeat fixed";
+
+  // ── State ────────────────────────────────────────────────────────────────
+  let exercises = []; // array of { name, image }
+  let currentIndex = 0;
+  let timeLeft = DURATION;
+  let timerId = null;
+  let paused = false;
+
+  // ── DOM refs ─────────────────────────────────────────────────────────────
+  const elStatus      = document.getElementById('status');
+  const elName        = document.getElementById('exercise-name');
+  const elRingWrapper = document.getElementById('ring-wrapper');
+  const elRingProg    = document.getElementById('ring-progress');
+  const elRingSeconds = document.getElementById('ring-seconds');
+  const elProgSection = document.getElementById('progress-section');
+  const elProgLabel   = document.getElementById('progress-label');
+  const elProgFill    = document.getElementById('progress-bar-fill');
+  const elControls    = document.getElementById('controls');
+  const elBtnPause    = document.getElementById('btn-pause');
+  const elBtnPrev     = document.getElementById('btn-prev');
+  const elBtnNext     = document.getElementById('btn-next');
+  const elFileSection  = document.getElementById('file-section');
+  const elFileInput    = document.getElementById('file-input');
+  const elNextExercise = document.getElementById('next-exercise');
+
+  // ── SVG ring constants ───────────────────────────────────────────────────
+  const CIRCUMFERENCE = 2 * Math.PI * 88; // ≈ 552.92
+
+  // ── CSV parsing ──────────────────────────────────────────────────────────
+  function parseCSV(text) {
+    const lines = text.trim().split(/\r?\n/);
+    const firstLower = lines[0].trim().toLowerCase();
+    const start = (firstLower.startsWith('exercise') || firstLower === 'name') ? 1 : 0;
+    return lines
+      .slice(start)
+      .map(l => {
+        // Split on first comma only so URLs containing commas are preserved
+        const commaIdx = l.indexOf(',');
+        const name  = commaIdx === -1 ? l.trim() : l.slice(0, commaIdx).trim();
+        const image = commaIdx === -1 ? '' : l.slice(commaIdx + 1).trim();
+        return { name, image };
+      })
+      .filter(e => e.name.length > 0);
+  }
+
+  // ── UI helpers ───────────────────────────────────────────────────────────
+  function setBackground(imageUrl) {
+    document.body.style.background = imageUrl
+      ? `url('${imageUrl}') center / cover no-repeat fixed`
+      : FALLBACK_BG;
+  }
+
+  function setExerciseName(name, animate = true) {
+    if (!animate) { elName.textContent = name; return; }
+    elName.classList.add('fade-out');
+    setTimeout(() => {
+      elName.textContent = name;
+      elName.classList.remove('fade-out');
+      elName.classList.add('fade-in');
+      setTimeout(() => elName.classList.remove('fade-in'), 400);
+    }, 400);
+  }
+
+  function updateRing(seconds) {
+    const fraction = seconds / DURATION;
+    const offset   = CIRCUMFERENCE * (1 - fraction);
+    elRingProg.style.strokeDashoffset = offset;
+    elRingSeconds.textContent = seconds;
+
+    const urgent = seconds <= 10;
+    elRingProg.classList.toggle('urgent', urgent);
+    elRingSeconds.classList.toggle('urgent', urgent);
+  }
+
+  function updateProgress() {
+    const pct = ((currentIndex) / exercises.length) * 100;
+    elProgLabel.textContent = `${currentIndex + 1} of ${exercises.length}`;
+    elProgFill.style.width  = pct + '%';
+  }
+
+  // ── Speech ───────────────────────────────────────────────────────────────
+  function speak(text) {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate  = 0.95;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  // ── Audio ─────────────────────────────────────────────────────────────────
+  let audioCtx = null;
+
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playBeep(frequency = 880, duration = 0.08, gain = 0.35) {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const vol = ctx.createGain();
+      osc.connect(vol);
+      vol.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(frequency, ctx.currentTime);
+      vol.gain.setValueAtTime(gain, ctx.currentTime);
+      vol.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + duration);
+    } catch (_) {}
+  }
+
+  // ── Timer ────────────────────────────────────────────────────────────────
+  function tick() {
+    timeLeft--;
+    updateRing(timeLeft);
+    if (timeLeft >= 1 && timeLeft <= 5) {
+      // Higher pitch on the final beep (1), standard tick for 5–2
+      playBeep(timeLeft === 1 ? 1320 : 880, timeLeft === 1 ? 0.18 : 0.08);
+    }
+    // Announce the next exercise name 3 seconds before the switch
+    if (timeLeft === 5) {
+      const nextIndex = (currentIndex + 1) % exercises.length;
+      const nextName  = exercises[nextIndex].name;
+      elNextExercise.innerHTML = `Next up: <span>${nextName}</span>`;
+      elNextExercise.classList.add('visible');
+    }
+    if (timeLeft === 3) {
+      const nextIndex = (currentIndex + 1) % exercises.length;
+      speak(`Next: ${exercises[nextIndex].name}`);
+    }
+    if (timeLeft <= 0) advanceExercise();
+  }
+
+  function startTimer() {
+    clearInterval(timerId);
+    timerId = setInterval(tick, 1000);
+    paused  = false;
+    elBtnPause.textContent = 'Pause';
+  }
+
+  function stopTimer() {
+    clearInterval(timerId);
+    paused = true;
+    elBtnPause.textContent = 'Resume';
+  }
+
+  function advanceExercise(delta = 1) {
+    currentIndex = (currentIndex + delta + exercises.length) % exercises.length;
+    timeLeft = DURATION;
+    elNextExercise.classList.remove('visible');
+    updateRing(timeLeft);
+    updateProgress();
+    const ex = exercises[currentIndex];
+    setBackground(ex.image);
+    setExerciseName(ex.name);
+    speak(ex.name);
+    if (!paused) startTimer();
+  }
+
+  // ── Initialise UI after loading exercises ────────────────────────────────
+  function init(list) {
+    exercises = list;
+    elStatus.textContent = '';
+    elFileSection.classList.remove('visible');
+    elRingWrapper.style.display = '';
+    elProgSection.style.display = '';
+    elControls.style.display    = '';
+
+    const ex = exercises[currentIndex];
+    setBackground(ex.image);
+    setExerciseName(ex.name, false);
+    updateRing(timeLeft);
+    updateProgress();
+    startTimer();
+  }
+
+  // ── Load CSV via fetch (works when served over HTTP) ─────────────────────
+  async function loadCSV() {
+    try {
+      const res = await fetch(CSV_PATH);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      const list = parseCSV(text);
+      if (!list.length) throw new Error('No exercises found');
+      init(list);
+    } catch (err) {
+      // Likely opened as file:// — show the manual picker
+      elStatus.textContent = '';
+      elFileSection.classList.add('visible');
+    }
+  }
+
+  // ── File picker fallback ─────────────────────────────────────────────────
+  elFileInput.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const list = parseCSV(ev.target.result);
+      if (!list.length) {
+        elStatus.textContent = 'No exercises found in file.';
+        return;
+      }
+      init(list);
+    };
+    reader.readAsText(file);
+  });
+
+  // ── Control buttons ──────────────────────────────────────────────────────
+  elBtnPause.addEventListener('click', () => {
+    if (paused) startTimer(); else stopTimer();
+  });
+
+  elBtnPrev.addEventListener('click', () => advanceExercise(-1));
+  elBtnNext.addEventListener('click', () => advanceExercise(1));
+
+  // ── Keyboard shortcuts ───────────────────────────────────────────────────
+  document.addEventListener('keydown', e => {
+    if (!exercises.length) return;
+    if (e.key === ' ')           { e.preventDefault(); elBtnPause.click(); }
+    if (e.key === 'ArrowRight')  advanceExercise(1);
+    if (e.key === 'ArrowLeft')   advanceExercise(-1);
+  });
+
+  // ── Boot ─────────────────────────────────────────────────────────────────
+  loadCSV();
+</script>
+</body>
+</html>
