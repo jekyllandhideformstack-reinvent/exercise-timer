@@ -19,7 +19,8 @@
         center / cover no-repeat fixed;
       font-family: 'Segoe UI', system-ui, sans-serif;
       color: #fff;
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
 
     /* ── Dark overlay for readability ── */
@@ -38,7 +39,7 @@
       flex-direction: column;
       align-items: center;
       gap: 32px;
-      padding: 24px;
+      padding: 24px 24px 48px;
       text-align: center;
     }
 
@@ -412,6 +413,83 @@
       opacity: 1;
       transform: translateX(-50%) translateY(0);
     }
+
+    /* ── Stats modal ── */
+    #stats-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    #stats-modal {
+      background: #12122a;
+      border: 1px solid #3a3a5c;
+      border-radius: 14px;
+      width: min(480px, 100%);
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #stats-modal h2 {
+      padding: 18px 24px 14px;
+      font-size: 0.9rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #a0a0c8;
+      border-bottom: 1px solid #2a2a4a;
+      flex-shrink: 0;
+    }
+
+    #stats-body {
+      overflow-y: auto;
+      flex: 1;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .stats-section {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .stats-section-title {
+      font-size: 0.72rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #7c7ca8;
+      margin-bottom: 2px;
+    }
+
+    .stats-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 14px;
+      background: #1a1a30;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+    }
+
+    .stats-row-label { font-size: 0.88rem; color: #c4c4e0; }
+    .stats-row-count { font-size: 1rem; font-weight: 700; color: #a78bfa; }
+
+    .stats-footer {
+      padding: 12px 18px;
+      border-top: 1px solid #2a2a4a;
+      display: flex;
+      justify-content: flex-end;
+      flex-shrink: 0;
+    }
   </style>
 </head>
 <body>
@@ -458,10 +536,22 @@
     <button id="btn-next">Next &#8594;</button>
     <button id="btn-shuffle">Shuffle</button>
     <button id="btn-edit">Edit</button>
+    <button id="btn-stats">View Stats</button>
   </div>
 
   <!-- Toast notification -->
   <div id="toast"></div>
+
+  <!-- Stats modal -->
+  <div id="stats-overlay" style="display:none">
+    <div id="stats-modal">
+      <h2>Stats</h2>
+      <div id="stats-body"></div>
+      <div class="stats-footer">
+        <button id="stats-close">Close</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Exercise editor modal -->
   <div id="editor-overlay" style="display:none">
@@ -542,6 +632,17 @@
         return { name, image };
       })
       .filter(e => e.name.length > 0);
+  }
+
+  // ── Event logging ────────────────────────────────────────────────────────
+  function logEvent(type, detail = null) {
+    const body = { event_type: type };
+    if (detail) body.detail = detail;
+    fetch(`${SUPABASE_URL}/rest/v1/events`, {
+      method: 'POST',
+      headers: sbHeaders({ 'Prefer': 'return=minimal' }),
+      body: JSON.stringify(body),
+    }).catch(() => {});
   }
 
   // ── Supabase ──────────────────────────────────────────────────────────────
@@ -685,7 +786,10 @@
       const nextIndex = (currentIndex + 1) % exercises.length;
       speak(`Next: ${exercises[nextIndex].name}`);
     }
-    if (timeLeft <= 0) advanceExercise();
+    if (timeLeft <= 0) {
+      logEvent('exercise_completed', exercises[currentIndex].name);
+      advanceExercise();
+    }
   }
 
   function startTimer() {
@@ -758,6 +862,7 @@
 
   // ── Shuffle ───────────────────────────────────────────────────────────────
   function shuffleExercises() {
+    logEvent('shuffle_pressed');
     const arr = [...exercises];
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -850,10 +955,100 @@
     }
   }
 
+  // ── Stats modal ───────────────────────────────────────────────────────────
+  function makeStatRow(label, value) {
+    const row = document.createElement('div');
+    row.className = 'stats-row';
+    const l = document.createElement('span');
+    l.className = 'stats-row-label';
+    l.textContent = label;
+    const v = document.createElement('span');
+    v.className = 'stats-row-count';
+    v.textContent = value;
+    row.append(l, v);
+    return row;
+  }
+
+  async function openStats() {
+    document.getElementById('stats-overlay').style.display = 'flex';
+    const body = document.getElementById('stats-body');
+    body.innerHTML = '<p style="color:#7c7ca8;font-size:0.85rem;text-align:center;padding:24px 0">Loading…</p>';
+
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/events?select=event_type,detail`,
+        { headers: sbHeaders() }
+      );
+      if (!res.ok) throw new Error();
+      const rows = await res.json();
+
+      const counts     = {};
+      const exCounts   = {};
+      for (const r of rows) {
+        counts[r.event_type] = (counts[r.event_type] || 0) + 1;
+        if (r.event_type === 'exercise_completed' && r.detail) {
+          exCounts[r.detail] = (exCounts[r.detail] || 0) + 1;
+        }
+      }
+
+      body.innerHTML = '';
+
+      if (!rows.length) {
+        body.innerHTML = '<p style="color:#7c7ca8;font-size:0.85rem;text-align:center;padding:24px 0">No activity recorded yet.</p>';
+        return;
+      }
+
+      // Activity section
+      const actSection = document.createElement('div');
+      actSection.className = 'stats-section';
+      const actTitle = document.createElement('div');
+      actTitle.className = 'stats-section-title';
+      actTitle.textContent = 'Activity';
+      actSection.appendChild(actTitle);
+      for (const [type, label] of [
+        ['exercise_completed', 'Exercises completed'],
+        ['next_pressed',       'Next pressed'],
+        ['prev_pressed',       'Prev pressed'],
+        ['shuffle_pressed',    'Shuffled'],
+        ['edit_pressed',       'Edit opened'],
+      ]) {
+        actSection.appendChild(makeStatRow(label, counts[type] || 0));
+      }
+      body.appendChild(actSection);
+
+      // Top exercises section
+      const topEx = Object.entries(exCounts).sort((a, b) => b[1] - a[1]);
+      if (topEx.length) {
+        const exSection = document.createElement('div');
+        exSection.className = 'stats-section';
+        const exTitle = document.createElement('div');
+        exTitle.className = 'stats-section-title';
+        exTitle.textContent = 'Most completed exercises';
+        exSection.appendChild(exTitle);
+        for (const [name, count] of topEx) {
+          exSection.appendChild(makeStatRow(name, count));
+        }
+        body.appendChild(exSection);
+      }
+    } catch (_) {
+      body.innerHTML = '<p style="color:#f97316;font-size:0.85rem;text-align:center;padding:24px 0">Failed to load stats.</p>';
+    }
+  }
+
+  function closeStats() {
+    document.getElementById('stats-overlay').style.display = 'none';
+  }
+
+  document.getElementById('stats-close').addEventListener('click', closeStats);
+  document.getElementById('stats-overlay').addEventListener('click', e => {
+    if (e.target.id === 'stats-overlay') closeStats();
+  });
+
   // ── Exercise editor ───────────────────────────────────────────────────────
   let editorList = [];
 
   function openEditor() {
+    logEvent('edit_pressed');
     editorList = exercises.map(e => ({ ...e }));
     renderEditorRows();
     document.getElementById('editor-overlay').style.display = 'flex';
@@ -1003,9 +1198,10 @@
     if (paused) startTimer(); else stopTimer();
   });
 
-  elBtnPrev.addEventListener('click', () => advanceExercise(-1));
-  elBtnNext.addEventListener('click', () => advanceExercise(1));
+  elBtnPrev.addEventListener('click', () => { logEvent('prev_pressed'); advanceExercise(-1); });
+  elBtnNext.addEventListener('click', () => { logEvent('next_pressed'); advanceExercise(1); });
   elBtnShuffle.addEventListener('click', shuffleExercises);
+  document.getElementById('btn-stats').addEventListener('click', openStats);
 
   // ── Keyboard shortcuts ───────────────────────────────────────────────────
   document.addEventListener('keydown', e => {
