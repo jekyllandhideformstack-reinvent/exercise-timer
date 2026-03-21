@@ -366,6 +366,52 @@
       color: #fff;
       font-weight: 600;
     }
+
+    /* ── Streak badge ── */
+    #streak-badge {
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: #a78bfa;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+
+    #streak-badge.visible { opacity: 1; }
+
+    #streak-badge.pulse {
+      animation: streakPulse 0.5s ease;
+    }
+
+    @keyframes streakPulse {
+      0%, 100% { transform: scale(1); }
+      50%       { transform: scale(1.25); }
+    }
+
+    /* ── Toast notification ── */
+    #toast {
+      position: fixed;
+      bottom: 48px;
+      left: 50%;
+      transform: translateX(-50%) translateY(16px);
+      background: rgba(108, 99, 255, 0.92);
+      color: #fff;
+      padding: 11px 28px;
+      border-radius: 30px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      opacity: 0;
+      transition: opacity 0.35s ease, transform 0.35s ease;
+      z-index: 50;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
   </style>
 </head>
 <body>
@@ -373,6 +419,9 @@
 
   <!-- Status / loading -->
   <p class="header" id="status">Loading exercises…</p>
+
+  <!-- Streak badge -->
+  <div id="streak-badge"><span id="streak-count">0</span>-day streak</div>
 
   <!-- Exercise name -->
   <div class="exercise-name" id="exercise-name"></div>
@@ -407,8 +456,12 @@
     <button id="btn-prev">&#8592; Prev</button>
     <button class="primary" id="btn-pause">Pause</button>
     <button id="btn-next">Next &#8594;</button>
+    <button id="btn-shuffle">Shuffle</button>
     <button id="btn-edit">Edit</button>
   </div>
+
+  <!-- Toast notification -->
+  <div id="toast"></div>
 
   <!-- Exercise editor modal -->
   <div id="editor-overlay" style="display:none">
@@ -466,6 +519,10 @@
   const elFileSection  = document.getElementById('file-section');
   const elFileInput    = document.getElementById('file-input');
   const elNextExercise = document.getElementById('next-exercise');
+  const elStreakBadge  = document.getElementById('streak-badge');
+  const elStreakCount  = document.getElementById('streak-count');
+  const elBtnShuffle   = document.getElementById('btn-shuffle');
+  const elToast        = document.getElementById('toast');
 
   // ── SVG ring constants ───────────────────────────────────────────────────
   const CIRCUMFERENCE = 2 * Math.PI * 88; // ≈ 552.92
@@ -644,8 +701,88 @@
     elBtnPause.textContent = 'Resume';
   }
 
+  // ── Toast ────────────────────────────────────────────────────────────────
+  let toastTimer = null;
+  function showToast(msg, duration = 3000) {
+    elToast.textContent = msg;
+    elToast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => elToast.classList.remove('show'), duration);
+  }
+
+  // ── Streak ───────────────────────────────────────────────────────────────
+  async function loadStreak() {
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/workout_streaks?select=date&order=date.desc`,
+        { headers: sbHeaders() }
+      );
+      if (!res.ok) return;
+      const rows = await res.json();
+      const dates = new Set(rows.map(r => r.date));
+      let streak = 0;
+      const today = new Date();
+      for (let i = 0; i < 365; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const key = d.toISOString().split('T')[0];
+        if (dates.has(key)) { streak++; } else { break; }
+      }
+      elStreakCount.textContent = streak;
+      elStreakBadge.classList.add('visible');
+    } catch (_) {}
+  }
+
+  async function recordCompletion() {
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/workout_streaks?on_conflict=date`, {
+        method: 'POST',
+        headers: sbHeaders({ 'Prefer': 'return=minimal,resolution=ignore-duplicates' }),
+        body: JSON.stringify({ date: today }),
+      });
+      // Bump streak display
+      const current = parseInt(elStreakCount.textContent, 10) || 0;
+      elStreakCount.textContent = current + 1;
+      elStreakBadge.classList.remove('pulse');
+      void elStreakBadge.offsetWidth; // reflow to restart animation
+      elStreakBadge.classList.add('pulse');
+    } catch (_) {}
+  }
+
+  function onWorkoutComplete() {
+    recordCompletion();
+    showToast('Workout complete! Great work.');
+    speak('Workout complete. Great work!');
+  }
+
+  // ── Shuffle ───────────────────────────────────────────────────────────────
+  function shuffleExercises() {
+    const arr = [...exercises];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    exercises = arr;
+    clearInterval(timerId);
+    currentIndex = 0;
+    timeLeft = DURATION;
+    paused = false;
+    updateRing(timeLeft);
+    updateProgress();
+    const ex = exercises[currentIndex];
+    setBackground(ex.image);
+    setExerciseName(ex.name, false);
+    elNextExercise.classList.remove('visible');
+    startTimer();
+    speak(ex.name);
+    showToast('Exercises shuffled.');
+  }
+
   function advanceExercise(delta = 1) {
+    const wasLast = delta > 0 && currentIndex === exercises.length - 1;
     currentIndex = (currentIndex + delta + exercises.length) % exercises.length;
+    if (wasLast && currentIndex === 0) onWorkoutComplete();
     timeLeft = DURATION;
     elNextExercise.classList.remove('visible');
     updateRing(timeLeft);
@@ -671,6 +808,7 @@
     setExerciseName(ex.name, false);
     updateRing(timeLeft);
     updateProgress();
+    loadStreak();
     startTimer();
   }
 
@@ -867,6 +1005,7 @@
 
   elBtnPrev.addEventListener('click', () => advanceExercise(-1));
   elBtnNext.addEventListener('click', () => advanceExercise(1));
+  elBtnShuffle.addEventListener('click', shuffleExercises);
 
   // ── Keyboard shortcuts ───────────────────────────────────────────────────
   document.addEventListener('keydown', e => {
