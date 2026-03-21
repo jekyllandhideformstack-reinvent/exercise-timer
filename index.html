@@ -238,6 +238,112 @@
 
     #file-input { display: none; }
 
+    /* ── Editor modal ── */
+    #editor-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    #editor-modal {
+      background: #12122a;
+      border: 1px solid #3a3a5c;
+      border-radius: 14px;
+      width: min(660px, 100%);
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #editor-modal h2 {
+      padding: 18px 24px 14px;
+      font-size: 0.9rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #a0a0c8;
+      border-bottom: 1px solid #2a2a4a;
+      flex-shrink: 0;
+    }
+
+    #editor-list {
+      overflow-y: auto;
+      flex: 1;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .editor-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      background: #1a1a30;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+
+    .editor-row-inputs {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .editor-row input {
+      background: #0e0e22;
+      border: 1px solid #3a3a5c;
+      border-radius: 6px;
+      color: #e0e0ff;
+      font-size: 0.82rem;
+      padding: 5px 9px;
+      outline: none;
+      transition: border-color 0.2s;
+      width: 100%;
+    }
+
+    .editor-row input:focus { border-color: #6c63ff; }
+    .editor-row input::placeholder { color: #4a4a6a; }
+
+    .editor-row-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .editor-row-actions button {
+      padding: 3px 7px;
+      font-size: 0.8rem;
+      min-width: 28px;
+    }
+
+    #editor-add {
+      margin: 6px 14px 10px;
+      align-self: flex-start;
+      font-size: 0.85rem;
+      color: #6c63ff;
+      border-color: #6c63ff;
+    }
+
+    .editor-footer {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      padding: 12px 18px;
+      border-top: 1px solid #2a2a4a;
+      flex-shrink: 0;
+    }
+
+    #editor-reset { margin-right: auto; color: #f97316; border-color: #f97316; }
+    #editor-reset:hover { background: rgba(249,115,22,0.15); border-color: #f97316; }
+
     /* ── Urgency colour when low ── */
     .ring-progress.urgent { stroke: #f97316; }
     .ring-seconds.urgent  { color: #f97316; }
@@ -301,6 +407,21 @@
     <button id="btn-prev">&#8592; Prev</button>
     <button class="primary" id="btn-pause">Pause</button>
     <button id="btn-next">Next &#8594;</button>
+    <button id="btn-edit">Edit</button>
+  </div>
+
+  <!-- Exercise editor modal -->
+  <div id="editor-overlay" style="display:none">
+    <div id="editor-modal">
+      <h2>Edit Exercises</h2>
+      <div id="editor-list"></div>
+      <button id="editor-add">+ Add Exercise</button>
+      <div class="editor-footer">
+        <button id="editor-reset">Reset to CSV</button>
+        <button id="editor-cancel">Cancel</button>
+        <button class="primary" id="editor-save">Save</button>
+      </div>
+    </div>
   </div>
 
   <!-- File picker fallback -->
@@ -318,6 +439,7 @@
   const DURATION = 60; // seconds per exercise
   const CSV_PATH = 'exercises.csv';
   const FALLBACK_BG = "url('https://images.pexels.com/photos/1954524/pexels-photo-1954524.jpeg?_gl=1*riw3rt*_ga*MzcwMTc4ODQyLjE3NzMwNjE3NDA.*_ga_8JE65Q40S6*czE3NzMwNjE3MzkkbzEkZzAkdDE3NzMwNjE3NDAkajU5JGwwJGgw') center / cover no-repeat fixed";
+  const STORAGE_KEY = 'exercise-timer-exercises';
 
   // ── State ────────────────────────────────────────────────────────────────
   let exercises = []; // array of { name, image }
@@ -517,6 +639,14 @@
 
   // ── Load CSV via fetch (works when served over HTTP) ─────────────────────
   async function loadCSV() {
+    // Prefer localStorage-saved exercises over the CSV
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      try {
+        const list = JSON.parse(stored);
+        if (list.length) { init(list); return; }
+      } catch (_) {}
+    }
     try {
       const res = await fetch(CSV_PATH);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -530,6 +660,121 @@
       elFileSection.classList.add('visible');
     }
   }
+
+  // ── Exercise editor ───────────────────────────────────────────────────────
+  let editorList = [];
+
+  function openEditor() {
+    editorList = exercises.map(e => ({ ...e }));
+    renderEditorRows();
+    document.getElementById('editor-overlay').style.display = 'flex';
+  }
+
+  function closeEditor() {
+    document.getElementById('editor-overlay').style.display = 'none';
+  }
+
+  function renderEditorRows() {
+    const container = document.getElementById('editor-list');
+    container.innerHTML = '';
+    editorList.forEach((ex, i) => {
+      const row = document.createElement('div');
+      row.className = 'editor-row';
+
+      const inputs = document.createElement('div');
+      inputs.className = 'editor-row-inputs';
+
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.placeholder = 'Exercise name';
+      nameInput.value = ex.name;
+      nameInput.addEventListener('input', e => { editorList[i].name = e.target.value; });
+
+      const imgInput = document.createElement('input');
+      imgInput.type = 'text';
+      imgInput.placeholder = 'Image URL (optional)';
+      imgInput.value = ex.image;
+      imgInput.addEventListener('input', e => { editorList[i].image = e.target.value; });
+
+      inputs.append(nameInput, imgInput);
+
+      const actions = document.createElement('div');
+      actions.className = 'editor-row-actions';
+
+      const upBtn = document.createElement('button');
+      upBtn.textContent = '↑';
+      upBtn.title = 'Move up';
+      upBtn.disabled = i === 0;
+      upBtn.addEventListener('click', () => {
+        [editorList[i - 1], editorList[i]] = [editorList[i], editorList[i - 1]];
+        renderEditorRows();
+      });
+
+      const downBtn = document.createElement('button');
+      downBtn.textContent = '↓';
+      downBtn.title = 'Move down';
+      downBtn.disabled = i === editorList.length - 1;
+      downBtn.addEventListener('click', () => {
+        [editorList[i + 1], editorList[i]] = [editorList[i], editorList[i + 1]];
+        renderEditorRows();
+      });
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '×';
+      delBtn.title = 'Remove';
+      delBtn.style.color = '#f97316';
+      delBtn.style.borderColor = '#f97316';
+      delBtn.addEventListener('click', () => {
+        editorList.splice(i, 1);
+        renderEditorRows();
+      });
+
+      actions.append(upBtn, downBtn, delBtn);
+      row.append(inputs, actions);
+      container.appendChild(row);
+    });
+  }
+
+  document.getElementById('editor-add').addEventListener('click', () => {
+    editorList.push({ name: '', image: '' });
+    renderEditorRows();
+    const list = document.getElementById('editor-list');
+    list.scrollTop = list.scrollHeight;
+    list.querySelectorAll('.editor-row input')[editorList.length * 2 - 2]?.focus();
+  });
+
+  document.getElementById('editor-save').addEventListener('click', () => {
+    const valid = editorList.filter(e => e.name.trim().length > 0);
+    if (!valid.length) { alert('Add at least one exercise.'); return; }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(valid));
+    closeEditor();
+    clearInterval(timerId);
+    currentIndex = 0;
+    timeLeft = DURATION;
+    paused = false;
+    init(valid);
+  });
+
+  document.getElementById('editor-cancel').addEventListener('click', closeEditor);
+
+  document.getElementById('editor-reset').addEventListener('click', () => {
+    if (!confirm('Reset to CSV and discard saved changes?')) return;
+    localStorage.removeItem(STORAGE_KEY);
+    closeEditor();
+    clearInterval(timerId);
+    currentIndex = 0;
+    timeLeft = DURATION;
+    paused = false;
+    exercises = [];
+    loadCSV();
+  });
+
+  // Close on overlay click
+  document.getElementById('editor-overlay').addEventListener('click', e => {
+    if (e.target.id === 'editor-overlay') closeEditor();
+  });
+
+  document.getElementById('btn-edit').addEventListener('click', openEditor);
 
   // ── File picker fallback ─────────────────────────────────────────────────
   elFileInput.addEventListener('change', e => {
