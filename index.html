@@ -440,6 +440,8 @@
   const CSV_PATH = 'exercises.csv';
   const FALLBACK_BG = "url('https://images.pexels.com/photos/1954524/pexels-photo-1954524.jpeg?_gl=1*riw3rt*_ga*MzcwMTc4ODQyLjE3NzMwNjE3NDA.*_ga_8JE65Q40S6*czE3NzMwNjE3MzkkbzEkZzAkdDE3NzMwNjE3NDAkajU5JGwwJGgw') center / cover no-repeat fixed";
   const STORAGE_KEY = 'exercise-timer-exercises';
+  const SUPABASE_URL = 'https://pigxfupxvvdfjrjtuueq.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpZ3hmdXB4dnZkZmpyanR1dWVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxMDYxODUsImV4cCI6MjA4OTY4MjE4NX0.jnRWUe14DAe53kUCtgh6mDc5gBfnub7O3cgHir7Fndo';
 
   // ── State ────────────────────────────────────────────────────────────────
   let exercises = []; // array of { name, image }
@@ -483,6 +485,41 @@
         return { name, image };
       })
       .filter(e => e.name.length > 0);
+  }
+
+  // ── Supabase ──────────────────────────────────────────────────────────────
+  function sbHeaders(extra = {}) {
+    return {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      ...extra,
+    };
+  }
+
+  async function loadFromSupabase() {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/exercises?select=name,image&order=position.asc`,
+      { headers: sbHeaders() }
+    );
+    if (!res.ok) throw new Error(`Supabase ${res.status}`);
+    return await res.json(); // [{ name, image }, ...]
+  }
+
+  async function saveToSupabase(list) {
+    // Replace all rows atomically: delete then insert
+    await fetch(`${SUPABASE_URL}/rest/v1/exercises?position=gte.0`, {
+      method: 'DELETE',
+      headers: sbHeaders({ 'Prefer': 'return=minimal' }),
+    });
+    if (!list.length) return;
+    const rows = list.map((e, i) => ({ position: i, name: e.name, image: e.image }));
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/exercises`, {
+      method: 'POST',
+      headers: sbHeaders({ 'Prefer': 'return=minimal' }),
+      body: JSON.stringify(rows),
+    });
+    if (!res.ok) throw new Error(`Supabase insert ${res.status}`);
   }
 
   // ── UI helpers ───────────────────────────────────────────────────────────
@@ -637,22 +674,36 @@
     startTimer();
   }
 
-  // ── Load CSV via fetch (works when served over HTTP) ─────────────────────
+  // ── Load exercises: Supabase → localStorage → CSV → file picker ──────────
   async function loadCSV() {
-    // Prefer localStorage-saved exercises over the CSV
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
+    // 1. Supabase (source of truth)
+    try {
+      const list = await loadFromSupabase();
+      if (list.length) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+        init(list);
+        return;
+      }
+    } catch (_) {}
+
+    // 2. localStorage cache (offline / Supabase unreachable)
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
         const list = JSON.parse(stored);
         if (list.length) { init(list); return; }
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
+
+    // 3. Fetch CSV — seed Supabase on first run
     try {
       const res = await fetch(CSV_PATH);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       const list = parseCSV(text);
       if (!list.length) throw new Error('No exercises found');
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      saveToSupabase(list).catch(() => {}); // seed DB, fire-and-forget
       init(list);
     } catch (err) {
       // Likely opened as file:// — show the manual picker
@@ -743,10 +794,26 @@
     list.querySelectorAll('.editor-row input')[editorList.length * 2 - 2]?.focus();
   });
 
+  function serializeCSV(list) {
+    return 'exercise,image\n' +
+      list.map(e => `${e.name},${e.image}`).join('\n') + '\n';
+  }
+
+  function downloadCSV(list) {
+    const blob = new Blob([serializeCSV(list)], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'exercises.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   document.getElementById('editor-save').addEventListener('click', () => {
     const valid = editorList.filter(e => e.name.trim().length > 0);
     if (!valid.length) { alert('Add at least one exercise.'); return; }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(valid));
+    saveToSupabase(valid).catch(err => console.warn('Supabase save failed:', err));
     closeEditor();
     clearInterval(timerId);
     currentIndex = 0;
@@ -760,6 +827,7 @@
   document.getElementById('editor-reset').addEventListener('click', () => {
     if (!confirm('Reset to CSV and discard saved changes?')) return;
     localStorage.removeItem(STORAGE_KEY);
+    saveToSupabase([]).catch(() => {}); // clear Supabase, fire-and-forget
     closeEditor();
     clearInterval(timerId);
     currentIndex = 0;
